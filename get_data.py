@@ -5,51 +5,108 @@ import os
 import re
 from pathlib import Path
 
-# Temporary folder for downloads & extraction
+def calculate_monthly_eui(df_meter, df_building):
+    # --- STEP 1: PREPARE DATA & DATES ---
+    # Ensure date column is datetime objects
+    df_meter['readingtime'] = pd.to_datetime(df_meter['readingtime'])
+    
+    # Extract Month and Year for grouping
+    df_meter['month'] = df_meter['readingtime'].dt.month
+    df_meter['year'] = df_meter['readingtime'].dt.year
+    
+    # Clean IDs for joining
+    df_meter['simscode_clean'] = df_meter['simscode'].astype(str).str.replace(r'\.0$', '', regex=True)
+    df_building['buildingnumber_clean'] = df_building['buildingnumber'].astype(str).str.replace(r'\.0$', '', regex=True)
+    df_building['grossarea'] = pd.to_numeric(df_building['grossarea'], errors='coerce')
+
+    # --- STEP 2: HANDLE DOUBLE COUNTING (Same logic as before) ---
+    # Identify buildings with STEAM and remove their HEAT readings
+    steam_buildings = set(df_meter[df_meter['utility'] == 'STEAM']['simscode_clean'])
+    mask_keep = (df_meter['utility'] != 'HEAT') | (~df_meter['simscode_clean'].isin(steam_buildings))
+    df_clean_meter = df_meter[mask_keep].copy()
+
+    # --- STEP 3: CONVERT TO KBTU ---
+    conversion_factors = {
+        'ELECTRICITY': 3.412,
+        'HEAT': 3.412,
+        'GAS': 3.412,
+        'COOLING': 3.412,
+        'OIL28SEC': 3.412,
+        'STEAM': 2.632 
+    }
+    
+    df_energy = df_clean_meter[df_clean_meter['utility'].isin(conversion_factors.keys())].copy()
+    df_energy['factor'] = df_energy['utility'].map(conversion_factors)
+    df_energy['kbtu'] = df_energy['readingvalue'] * df_energy['factor']
+
+    # --- STEP 4: AGGREGATE BY MONTH ---
+    # Group by Building AND Month/Year
+    df_monthly = df_energy.groupby(['simscode_clean', 'year', 'month'])['kbtu'].sum().reset_index()
+
+    # --- STEP 5: JOIN & CALCULATE MONTHLY EUI ---
+    df_final = pd.merge(
+        df_monthly,
+        df_building[['buildingnumber_clean', 'buildingname', 'grossarea']],
+        left_on='simscode_clean',
+        right_on='buildingnumber_clean',
+        how='inner'
+    )
+
+    # Calculate Monthly EUI
+    df_final = df_final[df_final['grossarea'] > 0]
+    df_final['Monthly_EUI'] = df_final['kbtu'] / df_final['grossarea']
+
+    # Sort by time for plotting
+    return df_final.sort_values(['buildingname', 'year', 'month'])
+
+# Make temp folder
 tmp_folder = "./energy_dataset"
 os.makedirs(tmp_folder, exist_ok=True)
 
 # ---------------------------
-# Step 1: Download Core + Bonus + Advanced Core ZIPs
+# Step 1: Download Core + Bonus ZIPs
 # ---------------------------
 zip_files = {
     "core": "https://drive.google.com/uc?id=13o_2ojFRCCqwmYMN3w3qu5fQxieXATTd",
-    "bonus": "https://drive.google.com/uc?id=1Hvqi5nv66m3b1aEN23NnUOBkVKQrfP5z",
-    "advanced_core": "PASTE_ADVANCED_CORE_URL_HERE" # Replace with actual URL
+    "bonus": "https://drive.google.com/uc?id=1Hvqi5nv66m3b1aEN23NnUOBkVKQrfP5z"
 }
 
 extracted_csv_paths = []
 
 for name, url in zip_files.items():
     zip_path = os.path.join(tmp_folder, f"{name}_dataset.zip")
-    
     if os.path.exists(zip_path):
-        print(f'{name} data already downloaded, skipping download')
-    elif "PASTE" in url:
-        print(f"Skipping {name}: No URL provided.")
+        print('Data already downloaded, skipping download')
         continue
-    else:
-        print(f"\nDownloading {name} ZIP...")
-        gdown.download(url, zip_path, quiet=False)
+    print(f"\nDownloading {name} ZIP...")
+    gdown.download(url, zip_path, quiet=False)
     
-    if os.path.exists(zip_path):
-        print(f"Extracting CSVs from {name} ZIP...")
-        with zipfile.ZipFile(zip_path, "r") as z:
-            for member in z.namelist():
-                # Filter out MacOS metadata and ignore weather files
-                if member.endswith(".csv") and "__MACOSX" not in member and "weather" not in member.lower():
-                    print(f"  Extracting {member}")
-                    z.extract(member, tmp_folder)
-                    extracted_csv_paths.append(os.path.join(tmp_folder, member))
+    print(f"Extracting CSVs from {name} ZIP...")
+    with zipfile.ZipFile(zip_path, "r") as z:
+        for member in z.namelist():
+            if member.endswith(".csv") and "__MACOSX" not in member:
+                print(f"  Extracting {member}")
+                z.extract(member, tmp_folder)
+                extracted_csv_paths.append(os.path.join(tmp_folder, member))
 
 # ---------------------------
-# Step 2: Load CSVs into Pandas
+# Step 2: Print list of CSV files
+# ---------------------------
+print("\nAll extracted CSV files:")
+if not extracted_csv_paths:
+    extracted_csv_paths = list(Path(tmp_folder).glob('**/*.csv'))
+for csv_path in extracted_csv_paths:
+    print(f" - {os.path.basename(csv_path)}")
+
+# ---------------------------
+# Step 3: Load CSVs into Pandas
 # ---------------------------
 pdf_dict = {}
-for csv_path in list(set(extracted_csv_paths)):
+for csv_path in extracted_csv_paths:
     csv_name = os.path.basename(csv_path)
-    print(f"\nLoading {csv_name}...")
-    pdf_dict[csv_name] = pd.read_csv(csv_path, encoding="latin1")
+    print(f"\nLoading {csv_name} into Pandas...")
+    pdf_dict[csv_name] = pd.read_csv(csv_path, encoding="latin1").dropna()
+    print(f"  {csv_name} loaded, shape: {pdf_dict[csv_name].shape}")
 
 # ---------------------------
 # Step 3: Advanced Merge Logic (Padded SIMS Code)
@@ -105,3 +162,38 @@ else:
     print("Error: No meter readings found.")
     
 print("\nCalculate EUI Monthly...")
+building_data = pdf_dict['building_metadata.csv']
+
+power_usage = calculate_monthly_eui(df_master, building_data)
+
+power_usage = power_usage.dropna()
+power_usage = power_usage.reset_index(drop=True)
+power_usage.to_csv('energy_EUI_monthly.csv', index=False)
+
+cols_to_use_from_df2 = [
+    'simscode_clean', 'year', 'month', 
+    'kbtu', 'Monthly_EUI', 'buildingnumber_clean'
+]
+df2_subset = power_usage[cols_to_use_from_df2]
+
+df_master['simscode'] = df_master['simscode'].astype(str).str.replace(r'\.0$', '', regex=True)
+df2_subset['simscode_clean'] = df2_subset['simscode_clean'].astype(str).str.strip()
+
+# 2. Perform the Merge
+mega_table = pd.merge(
+    left=df_master,
+    right=df2_subset,
+    # Map the columns from Table 1 to Table 2
+    left_on=['simscode', 'year', 'month'], 
+    right_on=['simscode_clean', 'year', 'month'],
+    how='left'
+)
+
+# 3. Cleanup (Optional)
+# If you don't want the extra "clean" columns hanging around after the join:
+mega_table = mega_table.drop(columns=['simscode_clean_x', 'simscode_clean_y', 'buildingnumber_clean'])
+mega_table = mega_table.dropna()
+mega_table = mega_table.reset_index(drop=True)
+
+print('Saving big mega dataset')
+mega_table.to_csv('big_mega_dataset.csv', index=False)
