@@ -9,7 +9,7 @@ import pandas as pd
 import os
 
 # Temporary folder for downloads & extraction
-tmp_folder = "/tmp/energy_dataset"
+tmp_folder = "./energy_dataset"
 os.makedirs(tmp_folder, exist_ok=True)
 
 # ---------------------------
@@ -24,6 +24,9 @@ extracted_csv_paths = []
 
 for name, url in zip_files.items():
     zip_path = os.path.join(tmp_folder, f"{name}_dataset.zip")
+    if os.path.exists(zip_path):
+        print('Data already downloaded, skipping download')
+        continue
     print(f"\nDownloading {name} ZIP...")
     gdown.download(url, zip_path, quiet=False)
     
