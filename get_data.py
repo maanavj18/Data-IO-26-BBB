@@ -105,7 +105,7 @@ pdf_dict = {}
 for csv_path in extracted_csv_paths:
     csv_name = os.path.basename(csv_path)
     print(f"\nLoading {csv_name} into Pandas...")
-    pdf_dict[csv_name] = pd.read_csv(csv_path, encoding="latin1").dropna()
+    pdf_dict[csv_name] = pd.read_csv(csv_path, encoding="latin1")
     print(f"  {csv_name} loaded, shape: {pdf_dict[csv_name].shape}")
 
 # ---------------------------
@@ -150,7 +150,7 @@ if reading_dfs:
         
         # Remove NaN
         
-        df_master = df_master.dropna()
+        df_master = df_master
         df_master.to_csv("master_dataset_combined.csv", index=False)
         
         print(f"Success! Master dataset created.")
@@ -166,7 +166,7 @@ building_data = pdf_dict['building_metadata.csv']
 
 power_usage = calculate_monthly_eui(df_master, building_data)
 
-power_usage = power_usage.dropna()
+power_usage = power_usage
 power_usage = power_usage.reset_index(drop=True)
 power_usage.to_csv('energy_EUI_monthly.csv', index=False)
 
@@ -192,7 +192,7 @@ mega_table = pd.merge(
 # 3. Cleanup (Optional)
 # If you don't want the extra "clean" columns hanging around after the join:
 mega_table = mega_table.drop(columns=['simscode_clean_x', 'simscode_clean_y', 'buildingnumber_clean'])
-mega_table = mega_table.dropna()
+mega_table = mega_table
 mega_table = mega_table.reset_index(drop=True)
 
 print('Saving big mega dataset')
