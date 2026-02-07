@@ -2,3 +2,4 @@
 venv
 
 energy_dataset
+*.csv
