@@ -7,6 +7,8 @@ import gdown
 import zipfile
 import pandas as pd
 import os
+from pathlib import Path
+
 
 # Temporary folder for downloads & extraction
 tmp_folder = "./energy_dataset"
@@ -42,6 +44,8 @@ for name, url in zip_files.items():
 # Step 2: Print list of CSV files
 # ---------------------------
 print("\nAll extracted CSV files:")
+if not extracted_csv_paths:
+    extracted_csv_paths = list(Path(tmp_folder).glob('**/*.csv'))
 for csv_path in extracted_csv_paths:
     print(f" - {os.path.basename(csv_path)}")
 
