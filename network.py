@@ -106,4 +106,10 @@ def train_and_predict_demand(df_meter, df_weather, target_sims_code, future_hour
 
 # --- HOW TO RUN ---
 # 1. Pick a building (e.g., '279' is Dreese Labs)
-# model, preds = train_and_predict_demand(meter_readings, weather_data, target_sims_code='279')
+
+meter_readings = pd.read_csv('./master_dataset_combinded.csv')
+weather_data = pd.read_csv('./energy_dataset/advanced_core/weather_data_hourly_2025.csv')
+
+# 279 is dreese
+model, preds = train_and_predict_demand(meter_readings, weather_data, target_sims_code='279')
+
